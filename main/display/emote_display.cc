@@ -29,104 +29,108 @@
 #include "expression_emote.h"
 #include "gfx.h"
 
+static const char* TAG = "emote_display";
+static lv_timer_t* g_eye_timer = nullptr;
+static lv_obj_t* g_eye_container = nullptr;
+static lv_obj_t* g_left_eye = nullptr;
+static lv_obj_t* g_right_eye = nullptr;
+static int g_anim_frame = 0;
+
+// 独立的眼睛动画回调
 static void eye_anim_timer_cb(lv_timer_t *timer)
 {
-    EmoteDisplay *disp = static_cast<EmoteDisplay *>(timer->user_data);
-    if (!disp) return;
+    if (!g_left_eye || !g_right_eye) return;
 
-    static int dir = 1;
-    static int x_off = 0;
-    const int max_move = 4;
-    lv_obj_t *left_eye = disp->left_eye;
-    lv_obj_t *right_eye = disp->right_eye;
-
-    x_off += dir;
-    if (x_off >= max_move) dir = -1;
-    if (x_off <= -max_move) dir = 1;
-
-    lv_obj_set_x(left_eye, -2 + x_off);
-    lv_obj_set_x(right_eye, 2 + x_off);
+    g_anim_frame++;
+    int h;
+    if (g_anim_frame % 35 < 30)
+    {
+        h = 12;
+    }
+    else
+    {
+        h = 2;
+    }
+    lv_obj_set_height(g_left_eye, h);
+    lv_obj_set_height(g_right_eye, h);
 }
 
 namespace emote {
 
-// ============================================================================
-// Constants and Type Definitions
-// ============================================================================
-
-static constexpr const char *TAG = "emote";
-
-EmoteDisplay::EmoteDisplay(lv_obj_t *parent)
+EmoteDisplay::EmoteDisplay()
 {
-    parent_ = parent;
-    eye_container_ = nullptr;
-    left_eye = nullptr;
-    right_eye = nullptr;
-    anim_timer = nullptr;
+    emote_handle_ = nullptr;
 }
 
 EmoteDisplay::~EmoteDisplay()
 {
-    if (anim_timer)
-    {
-        lv_timer_del(anim_timer);
-        anim_timer = nullptr;
-    }
 }
 
-bool EmoteDisplay::init()
+bool EmoteDisplay::init(lv_obj_t *parent)
 {
-    eye_container_ = lv_obj_create(parent_);
-    lv_obj_remove_style_all(eye_container_);
-    lv_obj_set_size(eye_container_, 128, 32);
-    lv_obj_set_pos(eye_container_, 0, 0);
-    lv_obj_set_flex_align(eye_container_, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_flex_flow(eye_container_, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(eye_container_, 12, 0);
+    emote_handle_ = expression_emote_create(parent);
+    if (!emote_handle_)
+    {
+        ESP_LOGE(TAG, "expression_emote create fail");
+        return false;
+    }
 
-    // 左眼
-    left_eye = lv_obj_create(eye_container_);
-    lv_obj_remove_style_all(left_eye);
-    lv_obj_set_size(left_eye, 18, 18);
-    lv_obj_set_style_radius(left_eye, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(left_eye, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(left_eye, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(left_eye, 0, 0);
+    // 只初始化一次眼睛，防止多次创建
+    if (!g_eye_container)
+    {
+        g_eye_container = lv_obj_create(parent);
+        lv_obj_set_size(g_eye_container, 128, 64);
+        lv_obj_set_pos(g_eye_container, 0, 0);
+        lv_obj_set_style_bg_opa(g_eye_container, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(g_eye_container, 0, 0);
 
-    // 右眼
-    right_eye = lv_obj_create(eye_container_);
-    lv_obj_remove_style_all(right_eye);
-    lv_obj_set_size(right_eye, 18, 18);
-    lv_obj_set_style_radius(right_eye, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(right_eye, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(right_eye, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(right_eye, 0, 0);
+        // 左眼
+        g_left_eye = lv_obj_create(g_eye_container);
+        lv_obj_set_size(g_left_eye, 14, 12);
+        lv_obj_set_pos(g_left_eye, 30, 22);
+        lv_obj_set_style_bg_color(g_left_eye, lv_color_white(), 0);
+        lv_obj_set_style_radius(g_left_eye, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_border_width(g_left_eye, 0, 0);
 
-    // 启动眼球左右晃动动画
-    anim_timer = lv_timer_create(eye_anim_timer_cb, 50, this);
+        // 右眼
+        g_right_eye = lv_obj_create(g_eye_container);
+        lv_obj_set_size(g_right_eye, 14, 12);
+        lv_obj_set_pos(g_right_eye, 84, 22);
+        lv_obj_set_style_radius(g_right_eye, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(g_right_eye, lv_color_white(), 0);
+        lv_obj_set_style_border_width(g_right_eye, 0, 0);
+
+        // 启动动画定时器
+        g_eye_timer = lv_timer_create(eye_anim_timer_cb, 50, nullptr);
+    }
     return true;
 }
 
-void EmoteDisplay::set_state(const char *state)
+void EmoteDisplay::SetStatus(const char * const status)
 {
-    if (!eye_container_) return;
+    if (!emote_handle_) return;
 
-    expression_emote_set_emote_handle_status(state);
-    if (strcmp(state, "idle") == 0)
-    {
-        // 待机：显示眼睛动画
-        lv_obj_clear_flag(eye_container_, LV_OBJ_FLAG_HIDDEN);
-    }
-    else
-    {
-        // 说话、聆听、思考：隐藏眼睛，使用官方表情
-        lv_obj_add_flag(eye_container_, LV_OBJ_FLAG_HIDDEN);
-    }
+    expression_emote_set(emote_handle_, status);
+    // 说话的时候，隐藏眨眼眼睛，优先原生表情
+    if(g_eye_container) lv_obj_add_flag(g_eye_container, LV_OBJ_FLAG_HIDDEN);
 }
 
-void EmoteDisplay::show_notification(const char *notification, int duration_ms)
+void EmoteDisplay::ShowNotification(const char *notification, int duration_ms)
 {
-    // 这里保留空实现，不改动原有逻辑
+    if (!emote_handle_) return;
+    expression_emote_notify(emote_handle_, notification, duration_ms);
 }
 
-} // namespace emote
+void EmoteDisplay::UpdateStatusBar(bool update_all)
+{
+    expression_emote_update_status_bar(emote_handle_, update_all);
+}
+
+void EmoteDisplay::clear()
+{
+    expression_emote_clear(emote_handle_);
+    // 说完清空表情，眼睛重新出来眨眼
+    if(g_eye_container) lv_obj_clear_flag(g_eye_container, LV_OBJ_FLAG_HIDDEN);
+}
+
+}
